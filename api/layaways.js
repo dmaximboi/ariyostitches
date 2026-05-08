@@ -5,38 +5,41 @@ export default withMiddleware(async (req, res) => {
     const db = getDb();
 
     if (req.method === 'POST') {
-        const { customer, items, totalAmount, downPayment, paymentRef, installments } = req.body;
+        const { customer, items, service, totalAmount, downPayment, paymentRef, installments } = req.body;
 
-        if (!customer?.phone || !customer?.email || !items?.length || !totalAmount || !downPayment || !paymentRef) {
+        if (!customer?.phone || !customer?.email || !totalAmount) {
             return res.status(400).json({ error: 'Missing required layaway fields' });
         }
 
-        const txResponse = await fetch(
-            `https://api.flutterwave.com/v3/transactions/${paymentRef}/verify`,
-            { headers: { Authorization: `Bearer ${process.env.FLW_SECRET_KEY}` } }
-        );
-        const txData = await txResponse.json();
+        if (paymentRef) {
+            const txResponse = await fetch(
+                `https://api.flutterwave.com/v3/transactions/${paymentRef}/verify`,
+                { headers: { Authorization: `Bearer ${process.env.FLW_SECRET_KEY}` } }
+            );
+            const txData = await txResponse.json();
 
-        if (txData.status !== 'success' || txData.data?.status !== 'successful') {
-            return res.status(400).json({ error: 'Payment verification failed' });
+            if (txData.status !== 'success' || txData.data?.status !== 'successful') {
+                return res.status(400).json({ error: 'Payment verification failed' });
+            }
         }
 
         const layawayId = `LAY-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+        const paidAmount = Number(downPayment || 0);
 
         await db.collection('layaways').doc(layawayId).set({
             layawayId,
             customer,
-            items,
+            items: items || (service ? [service] : []),
             totalAmount: Number(totalAmount),
-            downPayment: Number(downPayment),
-            remainingBalance: Number(totalAmount) - Number(downPayment),
+            paidAmount: paidAmount,
+            remainingAmount: Number(totalAmount) - paidAmount,
             installments: installments || 3,
-            payments: [{
-                amount: Number(downPayment),
+            payments: paymentRef ? [{
+                amount: paidAmount,
                 ref: String(paymentRef),
                 date: Date.now(),
                 type: 'down_payment',
-            }],
+            }] : [],
             status: 'active',
             createdAt: Date.now(),
         });
@@ -72,14 +75,31 @@ export default withMiddleware(async (req, res) => {
         const { amount, paymentRef: pRef } = req.body;
         if (!amount || !pRef) return res.status(400).json({ error: 'Amount and payment reference required' });
 
+        // Verify payment first
+        const txResponse = await fetch(
+            `https://api.flutterwave.com/v3/transactions/${pRef}/verify`,
+            { headers: { Authorization: `Bearer ${process.env.FLW_SECRET_KEY}` } }
+        );
+        const txData = await txResponse.json();
+
+        if (txData.status !== 'success' || txData.data?.status !== 'successful') {
+            return res.status(400).json({ error: 'Payment verification failed' });
+        }
+
+        if (Number(txData.data.amount) < Number(amount)) {
+            return res.status(400).json({ error: 'Payment amount mismatch' });
+        }
+
         const doc = await db.collection('layaways').doc(id).get();
         if (!doc.exists) return res.status(404).json({ error: 'Layaway not found' });
 
         const data = doc.data();
-        const newBalance = data.remainingBalance - Number(amount);
+        const paidAmount = (data.paidAmount || data.downPayment || 0) + Number(amount);
+        const remainingAmount = data.totalAmount - paidAmount;
 
         const update = {
-            remainingBalance: Math.max(0, newBalance),
+            paidAmount: paidAmount,
+            remainingAmount: Math.max(0, remainingAmount),
             payments: [...(data.payments || []), {
                 amount: Number(amount),
                 ref: String(pRef),
@@ -88,10 +108,10 @@ export default withMiddleware(async (req, res) => {
             }],
         };
 
-        if (newBalance <= 0) update.status = 'completed';
+        if (remainingAmount <= 0) update.status = 'completed';
 
         await db.collection('layaways').doc(id).update(update);
-        return res.status(200).json({ success: true, remainingBalance: Math.max(0, newBalance) });
+        return res.status(200).json({ success: true, remainingAmount: Math.max(0, remainingAmount) });
     }
 
     return res.status(405).json({ error: 'Method not allowed' });

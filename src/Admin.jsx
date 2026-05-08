@@ -14,7 +14,7 @@ export default function Admin() {
     const [activeTab, setActiveTab] = useState('upload');
 
     // Admin emails from environment variable
-    const adminEmails = (import.meta.env.VITE_ADMIN_EMAILS || '').toLowerCase().split(',');
+    const adminEmails = (import.meta.env.VITE_ADMIN_EMAILS || '').toLowerCase().split(',').map(e => e.trim()).filter(Boolean);
 
     // Login States
     const [email, setEmail] = useState('');
@@ -173,13 +173,19 @@ export default function Admin() {
         setVerifiedOrder(null);
 
         try {
-            const response = await ApiService.verifyOrder(orderId);
-            const data = response.data;
+            let data;
+            if (orderId.toUpperCase().startsWith('LAY-')) {
+                const response = await ApiService.getLayawayById(orderId);
+                data = { ...response.data, type: 'layaway' };
+            } else {
+                const response = await ApiService.verifyOrder(orderId);
+                data = { ...response.data, type: 'order' };
+            }
 
             setVerifyStatus('valid');
             setVerifiedOrder(data);
 
-            if (!data.scanned) {
+            if (data.type === 'order' && !data.scanned) {
                 await ApiService.updateOrderStatus(orderId, undefined, true);
             }
         } catch (e) {

@@ -21,7 +21,7 @@ export default function Checkout() {
         if (!email.trim()) newErrors.email = 'Required';
         else if (!/\S+@\S+\.\S+/.test(email)) newErrors.email = 'Invalid email';
         if (!phone.trim()) newErrors.phone = 'Required';
-        else if (!/^0[789][01]\d{8}$/.test(phone.replace(/\s/g, ''))) {
+        else if (!/^0\d{10}$/.test(phone.replace(/\s/g, ''))) {
             newErrors.phone = 'Invalid phone';
         }
         setErrors(newErrors);
@@ -56,7 +56,7 @@ export default function Checkout() {
 
             closePaymentModal();
             clearCart();
-            navigate(`/success/${orderResponse.data.id}`);
+            navigate(`/success/${orderResponse.data.orderId}`);
         } catch (error) {
             console.error("Order error:", error);
             alert("Order processing failed. Please contact support if payment was debited.");
