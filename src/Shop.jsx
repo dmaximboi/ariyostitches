@@ -1,3 +1,4 @@
+import React, { useState, useEffect } from 'react';
 import { ApiService } from './services/api';
 import { useCart } from './CartContext';
 import { Plus, Check, Search, ShoppingBag } from 'lucide-react';
@@ -14,7 +15,11 @@ export default function Shop() {
         const fetchProducts = async () => {
             try {
                 const response = await ApiService.getProducts();
-                setProducts(response.data);
+                if (Array.isArray(response.data)) {
+                    setProducts(response.data);
+                } else {
+                    console.error("Products response is not an array:", response.data);
+                }
             } catch (error) {
                 console.error("Error fetching products:", error);
             } finally {
